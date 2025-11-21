@@ -86,7 +86,7 @@ const ChatInput = React.forwardRef<ChatInputHandle, { onSend: (content: string) 
     };
 
     return (
-      <div className="flex gap-3 px-3 pb-3">
+      <div className="flex gap-3 px-3 py-3">
         <Textarea
           ref={textareaRef as any}
           value={value}
@@ -208,6 +208,9 @@ export function AdminChat() {
   // ref to ChatInput so we can focus it when selecting a member
   const chatInputRef = useRef<ChatInputHandle | null>(null);
 
+  // ref to messages container for scrolling
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+
   // helper: normalize DB rows
   const normalize = (row: any): NormalizedMessage => {
     const createdAt = row.created_at ?? row.sent_at ?? null;
@@ -328,6 +331,48 @@ export function AdminChat() {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [loadMessages]);
+
+  // auto-scroll when messages or selectedMember changes — but avoid auto-scrolling while input is focused
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    if (inputFocusedRef.current) return;
+    // scroll to bottom; use 'auto' for immediate effect if many messages to avoid long smooth scrolls
+    try {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+    } catch {
+      // fallback
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, selectedMemberId]);
+
+  // ensure document-level focusin/focusout updates inputFocusedRef and applies pending messages on blur
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('textarea') || target.closest('input')) {
+        inputFocusedRef.current = true;
+      }
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('textarea') || target.closest('input')) {
+        inputFocusedRef.current = false;
+        if (pendingMessagesRef.current) {
+          setMessages(pendingMessagesRef.current);
+          pendingMessagesRef.current = null;
+        }
+      }
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
 
   const getUnreadCount = (memberId: string) => {
     const adminId = currentUserIdRef.current ?? 'admin';
@@ -531,15 +576,24 @@ export function AdminChat() {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-7 h-[760px] flex flex-col">
+        {/* MAIN CHAT CARD */}
+        {/* Note: removed fixed height (h-[760px]) so card is flexible.
+            CardContent uses flex-1 flex-col min-h-0 so overflow-y children can work. */}
+        <Card className="md:col-span-7 flex flex-col">
           <CardHeader>
             <CardTitle>{selectedMember ? `Chat with ${selectedMember.name}` : 'Select a member'}</CardTitle>
           </CardHeader>
 
-          <CardContent className="flex-1 flex flex-col">
+          {/* CardContent must be a flex column with min-h-0 to allow proper overflow behavior */}
+          <CardContent className="flex-1 flex flex-col min-h-0 relative">
             {selectedMember ? (
               <>
-                <div className="flex-1 overflow-y-auto space-y-6 mb-4 px-3 py-4">
+                {/* messages container: flex-1 so it consumes available space and scrolls internally */}
+                <div
+                  ref={messagesContainerRef}
+                  className="flex-1 overflow-y-auto space-y-6 px-3 py-4"
+                  aria-live="polite"
+                >
                   {memberMessages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-8">No messages yet. Start a conversation!</p>
                   ) : (
@@ -568,15 +622,9 @@ export function AdminChat() {
                   )}
                 </div>
 
-                <div>
-                  <ChatInput
-                    ref={chatInputRef}
-                    onSend={chatOnSend}
-                    disabled={!selectedMemberId}
-                  />
-                  {/* manage focus state for server polling */}
-                  {/* we attach event listeners to the inner textarea via the ref's focus/blur isn't enough,
-                      so use document-level focusin/focusout to update inputFocusedRef appropriately */}
+                {/* input wrapper sits after messages container; mt-auto ensures it stays at the bottom */}
+                <div className="mt-auto border-t border-muted/10">
+                  <ChatInput ref={chatInputRef} onSend={chatOnSend} disabled={!selectedMemberId} />
                 </div>
               </>
             ) : (

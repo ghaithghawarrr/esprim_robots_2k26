@@ -207,6 +207,9 @@ export function MemberChat(): JSX.Element | null {
   const pollingRef = useRef<number | null>(null);
   const selectionListRef = useRef<HTMLDivElement | null>(null);
 
+  // ref for messages container scrolling
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+
   const currentUserId = user?.id ?? null;
   if (!currentUserId) return null;
 
@@ -362,6 +365,18 @@ export function MemberChat(): JSX.Element | null {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [loadAdmins, loadMessages]);
+
+  // auto-scroll when messages or selectedAdmin changes — but avoid auto-scrolling while input is focused
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    if (inputFocusedRef.current) return;
+    try {
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+    } catch {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, selectedAdminId]);
 
   const getUnreadCount = (adminId: string) =>
     messages.filter((m) => m.from === adminId && (m.to === currentUserId || m.to === "admin") && !m.read).length;
@@ -554,22 +569,20 @@ export function MemberChat(): JSX.Element | null {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-7 h-[760px] flex flex-col">
+        {/* MAIN CHAT CARD */}
+        {/* Removed fixed height and ensured flex layout so overflow works correctly */}
+        <Card className="md:col-span-7 flex flex-col">
           <CardHeader className="flex items-center justify-between">
             <CardTitle>{selectedAdmin ? `Chat with ${selectedAdmin.name}` : "Select an admin"}</CardTitle>
-            <div className="flex items-center gap-2">
-              {selectedAdmin && (
-                <Button variant="ghost" size="sm" onClick={() => markAsRead(selectedAdmin.id)}>
-                  Mark read
-                </Button>
-              )}
-            </div>
+
           </CardHeader>
 
-          <CardContent className="flex-1 flex flex-col">
+          {/* CardContent must be a flex column with min-h-0 to allow proper overflow behavior */}
+          <CardContent className="flex-1 flex flex-col min-h-0 relative">
             {selectedAdmin ? (
               <>
-                <div className="flex-1 overflow-y-auto space-y-6 mb-4 px-3 py-4">
+                {/* messages container: flex-1 so it consumes available space and scrolls internally */}
+                <div ref={messagesContainerRef} className="flex-1 overflow-y-auto space-y-6 px-3 py-4" aria-live="polite">
                   {adminMessages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-8">No messages yet. Start a conversation!</p>
                   ) : (
@@ -597,7 +610,8 @@ export function MemberChat(): JSX.Element | null {
                   )}
                 </div>
 
-                <div>
+                {/* input wrapper sits after messages container; mt-auto ensures it stays at the bottom */}
+                <div className="mt-auto border-t border-muted/10">
                   <ChatInput ref={chatInputRef} onSend={handleSend} disabled={!selectedAdminId} onFocus={handleInputFocus} onBlur={handleInputBlur} />
                 </div>
               </>
